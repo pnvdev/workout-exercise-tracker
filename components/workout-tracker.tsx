@@ -49,6 +49,44 @@ const formSchema = z.object({
 
 type Exercise = z.infer<typeof formSchema>
 
+// Helper function to convert camelCase to snake_case
+function toSnakeCase(obj: Record<string, any>): Record<string, any> {
+  const result: Record<string, any> = {}
+
+  Object.keys(obj).forEach((key) => {
+    // Convert camelCase to snake_case
+    const snakeKey = key.replace(/([A-Z])/g, "_$1").toLowerCase()
+
+    // Handle date objects specially
+    if (obj[key] instanceof Date) {
+      result[snakeKey] = obj[key].toISOString()
+    } else {
+      result[snakeKey] = obj[key]
+    }
+  })
+
+  return result
+}
+
+// Helper function to convert snake_case to camelCase
+function toCamelCase(obj: Record<string, any>): Record<string, any> {
+  const result: Record<string, any> = {}
+
+  Object.keys(obj).forEach((key) => {
+    // Convert snake_case to camelCase
+    const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())
+
+    // Handle date strings specially
+    if (key.includes("date") && typeof obj[key] === "string") {
+      result[camelKey] = new Date(obj[key])
+    } else {
+      result[camelKey] = obj[key]
+    }
+  })
+
+  return result
+}
+
 export default function WorkoutTracker() {
   const { language } = useLanguage()
   const { session, isGuest } = useAuth()
@@ -161,11 +199,8 @@ export default function WorkoutTracker() {
           if (error) throw error
 
           if (data) {
-            // Convert date strings to Date objects
-            const formattedData = data.map((exercise) => ({
-              ...exercise,
-              date: new Date(exercise.date),
-            }))
+            // Convert snake_case to camelCase and format dates
+            const formattedData = data.map((exercise) => toCamelCase(exercise) as Exercise)
             setExercises(formattedData)
 
             // Sync localStorage with Supabase data
@@ -217,13 +252,19 @@ export default function WorkoutTracker() {
             // First delete all existing exercises for this user
             await supabase.from("exercises").delete().eq("user_id", session.id)
 
-            // Then insert all current exercises
-            const exercisesWithUserId = exercises.map((exercise) => ({
-              ...exercise,
-              user_id: session.id,
-            }))
+            // Convert exercises to snake_case and add user_id
+            const exercisesForSupabase = exercises.map((exercise) => {
+              // First convert to snake_case
+              const snakeCaseExercise = toSnakeCase(exercise)
 
-            const { error } = await supabase.from("exercises").insert(exercisesWithUserId)
+              // Add user_id
+              return {
+                ...snakeCaseExercise,
+                user_id: session.id,
+              }
+            })
+
+            const { error } = await supabase.from("exercises").insert(exercisesForSupabase)
 
             if (error) throw error
 
@@ -263,11 +304,16 @@ export default function WorkoutTracker() {
   })
 
   function onSubmit(values: Exercise) {
+    // Add the exercise to the state
     setExercises([...exercises, values])
+
+    // Show success toast
     toast({
       title: t.exerciseAdded,
       description: t.exerciseAddedDesc.replace("{name}", values.exerciseName),
     })
+
+    // Reset form with some values preserved
     form.reset({
       exerciseName: "",
       category: values.category,
@@ -278,6 +324,8 @@ export default function WorkoutTracker() {
       date: values.date,
       notes: "",
     })
+
+    // Hide the form after successful submission
     setShowForm(false)
   }
 
@@ -483,14 +531,7 @@ export default function WorkoutTracker() {
                   <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
                     {t.cancel}
                   </Button>
-                  <Button
-                    type="submit"
-                    onClick={() => {
-                      if (form.formState.isValid) {
-                        setShowForm(false)
-                      }
-                    }}
-                  >
+                  <Button type="submit">
                     <Plus className="mr-2 h-4 w-4" /> {t.addExercise}
                   </Button>
                 </div>
